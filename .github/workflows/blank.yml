@@ -20,39 +20,40 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 安装核心依赖，包括 32 位运行库和解包工具
+        # 安装 32 位库和必要工具
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
                            xz-utils gzip bzip2 git
-        pip3 install twrpdtgen python-magic
         
-        # 核心修复：手动准备 AIK 环境，防止 twrpdtgen 自动克隆失败
-        git clone https://github.com/SebaUbuntu/AIK-Linux-mirror /home/runner/AIK
-        chmod -R 777 /home/runner/AIK
+        # 关键：使用 sudo 安装 pip 模块，确保全局可用
+        sudo pip3 install twrpdtgen python-magic
+        
+        # 预先准备 AIK 环境并赋予最高权限
+        sudo git clone https://github.com/SebaUbuntu/AIK-Linux-mirror /home/runner/AIK
+        sudo chmod -R 777 /home/runner/AIK
         
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 自动重命名镜像
+        # 识别下载的第一个 img 文件并重命名
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
         ls -lh
       
     - name: Start build
       run: |
-        # 显式告知环境变量（如果工具支持）并运行
-        # 针对 3.0.0 版本，如果它依然尝试自己 clone，我们通过 sudo 提升权限强制执行
+        # 统一使用 sudo 运行，确保解包过程不会因为权限报 return code 1
         sudo python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
       run: |
-        # 更加宽松的打包判定
-        if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
-          zip -r DeviceTree.zip ./dt
+        # 增加 sudo 权限打包，防止某些解包出来的文件无法读取
+        if [ -d "dt" ]; then
+          sudo zip -r DeviceTree.zip ./dt
         else
-          echo "Error: Device tree generation failed. No files in dt/"
+          echo "Error: dt directory not found."
           exit 1
         fi
 
@@ -64,8 +65,6 @@ jobs:
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          Build successful!
           Generated from: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
