@@ -20,21 +20,26 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        sudo apt -y install python-is-python3 python3 python3-pip cpio wget aria2c
+        # 修正：将 aria2c 改为 aria2
+        sudo apt -y install python-is-python3 python3 python3-pip cpio wget aria2
         pip3 install twrpdtgen
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
+        # 注意：这里调用的命令依然是 aria2c，这是正确的
         aria2c "${{ github.event.inputs.IMG_URL }}"
         ls
       
     - name: Start build
       run: |
+        # twrpdtgen 会处理目录下所有的 .img 文件
         python3 -m twrpdtgen -o dt/ *.img
+
     - name: ZIP device tree
       run: |
         zip -r DeviceTree.zip ./dt
+
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
@@ -44,4 +49,4 @@ jobs:
         tag_name: ${{ github.run_id }}
         body: DeviceTree for twrp
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}S
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
