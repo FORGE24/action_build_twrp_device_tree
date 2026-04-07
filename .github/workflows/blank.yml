@@ -20,37 +20,38 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 修正：将 dtc 改为 device-tree-compiler
+        # 安装所有必要的底层依赖
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
                            xz-utils gzip bzip2 git lz4 lzop device-tree-compiler tar
         
-        # 核心改动：降级到 2.1.2 版本，这个版本在 Actions 里最稳
-        sudo pip3 install twrpdtgen==2.1.2 python-magic
+        # 升级 pip 并安装稳定的 2.1.0 版本
+        sudo pip3 install --upgrade pip
+        sudo pip3 install twrpdtgen==2.1.0 python-magic
         
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 识别并统一命名
+        # 识别并统一命名镜像文件
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
-        echo "File info:"
+        echo "File check:"
         file recovery.img
       
     - name: Start build
       run: |
-        # 2.1.2 版本的参数格式非常标准
+        # 使用 2.1.0 版本进行构建
         python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
       run: |
-        # 只要生成的目录里有文件就打包
+        # 检查是否生成了文件夹（2.1.x 生成的结构通常在 dt/ 目录下）
         if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
           zip -r DeviceTree.zip ./dt
         else
-          echo "Error: Device tree generation failed."
+          echo "Error: Device tree generation failed. Current directory content:"
           ls -R
           exit 1
         fi
@@ -63,8 +64,8 @@ jobs:
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          Build info:
-          - Tool: twrpdtgen v2.1.2 (Stable)
-          - Image: ${{ github.event.inputs.IMG_URL }}
+          Build successful!
+          - Tool: twrpdtgen v2.1.0
+          - Image URL: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
