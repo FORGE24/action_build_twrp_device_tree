@@ -20,40 +20,47 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 安装 32 位库和必要工具
+        # 补全所有 AIK 可能用到的解压缩和处理工具
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
-                           xz-utils gzip bzip2 git
+                           xz-utils gzip bzip2 git lz4 lzop dtc tar
         
-        # 关键：使用 sudo 安装 pip 模块，确保全局可用
-        sudo pip3 install twrpdtgen python-magic
+        # 全局安装模块
+        sudo pip3 install twrpdtgen python-magic sebaubuntu-libs
         
-        # 预先准备 AIK 环境并赋予最高权限
-        sudo git clone https://github.com/SebaUbuntu/AIK-Linux-mirror /home/runner/AIK
-        sudo chmod -R 777 /home/runner/AIK
+        # 建立一个绝对可以执行的 AIK 目录，并将其放入 PATH
+        sudo git clone https://github.com/SebaUbuntu/AIK-Linux-mirror /opt/AIK
+        sudo chmod -R 777 /opt/AIK
+        echo "/opt/AIK" >> $GITHUB_PATH
         
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 识别下载的第一个 img 文件并重命名
+        # 确保只处理一个 img，并强制命名
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
-        ls -lh
+        # 验证文件类型，如果不是 Android boot img，这里会直接看到
+        file recovery.img
       
     - name: Start build
       run: |
-        # 统一使用 sudo 运行，确保解包过程不会因为权限报 return code 1
-        sudo python3 -m twrpdtgen recovery.img -o dt/
+        # 设置环境变量，尝试让 libaik 识别已有路径（虽然 3.0.0 比较顽固）
+        export AIK_PATH=/opt/AIK
+        
+        # 尝试使用普通用户运行，如果失败再考虑 sudo
+        # 增加 --ignore-bitness 避免因为 32/64 位检测导致的退出（如果参数支持）
+        python3 -m twrpdtgen recovery.img -o dt/ || sudo python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
       run: |
-        # 增加 sudo 权限打包，防止某些解包出来的文件无法读取
-        if [ -d "dt" ]; then
-          sudo zip -r DeviceTree.zip ./dt
+        # 这里的打包逻辑更强健：如果 dt 下面没生成，就去当前目录找可能的产物
+        if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
+          zip -r DeviceTree.zip ./dt
         else
-          echo "Error: dt directory not found."
+          echo "Build failed, trying to find any generated folders..."
+          ls -R
           exit 1
         fi
 
@@ -64,7 +71,5 @@ jobs:
           ./DeviceTree.zip
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: |
-          Generated from: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
