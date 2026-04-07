@@ -30,7 +30,7 @@ jobs:
 
     - name: Download and Pre-process Image
       run: |
-        aria2c -L "${{ github.event.inputs.IMG_URL }}"
+        aria2c "${{ github.event.inputs.IMG_URL }}"
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
         
