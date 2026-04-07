@@ -20,46 +20,37 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 补全所有 AIK 可能用到的解压缩和处理工具
+        # 修正：将 dtc 改为 device-tree-compiler
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
-                           xz-utils gzip bzip2 git lz4 lzop dtc tar
+                           xz-utils gzip bzip2 git lz4 lzop device-tree-compiler tar
         
-        # 全局安装模块
-        sudo pip3 install twrpdtgen python-magic sebaubuntu-libs
-        
-        # 建立一个绝对可以执行的 AIK 目录，并将其放入 PATH
-        sudo git clone https://github.com/SebaUbuntu/AIK-Linux-mirror /opt/AIK
-        sudo chmod -R 777 /opt/AIK
-        echo "/opt/AIK" >> $GITHUB_PATH
+        # 核心改动：降级到 2.1.2 版本，这个版本在 Actions 里最稳
+        sudo pip3 install twrpdtgen==2.1.2 python-magic
         
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 确保只处理一个 img，并强制命名
+        # 识别并统一命名
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
-        # 验证文件类型，如果不是 Android boot img，这里会直接看到
+        echo "File info:"
         file recovery.img
       
     - name: Start build
       run: |
-        # 设置环境变量，尝试让 libaik 识别已有路径（虽然 3.0.0 比较顽固）
-        export AIK_PATH=/opt/AIK
-        
-        # 尝试使用普通用户运行，如果失败再考虑 sudo
-        # 增加 --ignore-bitness 避免因为 32/64 位检测导致的退出（如果参数支持）
-        python3 -m twrpdtgen recovery.img -o dt/ || sudo python3 -m twrpdtgen recovery.img -o dt/
+        # 2.1.2 版本的参数格式非常标准
+        python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
       run: |
-        # 这里的打包逻辑更强健：如果 dt 下面没生成，就去当前目录找可能的产物
+        # 只要生成的目录里有文件就打包
         if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
           zip -r DeviceTree.zip ./dt
         else
-          echo "Build failed, trying to find any generated folders..."
+          echo "Error: Device tree generation failed."
           ls -R
           exit 1
         fi
@@ -71,5 +62,9 @@ jobs:
           ./DeviceTree.zip
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
+        body: |
+          Build info:
+          - Tool: twrpdtgen v2.1.2 (Stable)
+          - Image: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
