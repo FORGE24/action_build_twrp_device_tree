@@ -20,52 +20,59 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 安装所有必要的底层依赖
+        # 安装所有可能的解包工具和 32 位库
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
                            xz-utils gzip bzip2 git lz4 lzop device-tree-compiler tar
         
-        # 升级 pip 并安装稳定的 2.1.0 版本
         sudo pip3 install --upgrade pip
+        # 使用稳定的 2.1.0 版本
         sudo pip3 install twrpdtgen==2.1.0 python-magic
+        
+        # 核心：使用你提供的 AIK 来源
+        git clone https://github.com/draekko/AIK-Linux.git $HOME/AIK
+        chmod -R 777 $HOME/AIK
         
         mkdir dt
       
-    - name: Download boot or recovery img
+    - name: Download and Check Image
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 识别并统一命名镜像文件
+        # 找到镜像并重命名
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
-        echo "File check:"
+        
+        echo "=== 镜像文件信息 ==="
         file recovery.img
+        du -sh recovery.img
       
     - name: Start build
       run: |
-        # 使用 2.1.0 版本进行构建
-        python3 -m twrpdtgen recovery.img -o dt/
+        # 尝试使用新版 AIK 逻辑构建
+        # twrpdtgen 内部虽然会自己下载，但手动准备环境通常能改善底层兼容性
+        python3 -m twrpdtgen recovery.img -o dt/ || sudo python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
+      if: always()
       run: |
-        # 检查是否生成了文件夹（2.1.x 生成的结构通常在 dt/ 目录下）
         if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
           zip -r DeviceTree.zip ./dt
         else
-          echo "Error: Device tree generation failed. Current directory content:"
-          ls -R
+          echo "构建失败。尝试手动测试 AIK 解包以查看具体错误："
+          cd $HOME/AIK
+          ./unpackimg.sh $GITHUB_WORKSPACE/recovery.img || echo "手动解包也失败了，请检查下方日志内容"
           exit 1
         fi
 
     - name: Upload to Release
+      if: success()
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          ./DeviceTree.zip
+        files: ./DeviceTree.zip
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          Build successful!
-          - Tool: twrpdtgen v2.1.0
-          - Image URL: ${{ github.event.inputs.IMG_URL }}
+          Build successful with draekko/AIK-Linux!
+          Image: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
