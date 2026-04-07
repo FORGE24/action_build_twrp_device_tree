@@ -20,25 +20,35 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 修正：将 aria2c 改为 aria2
-        sudo apt -y install python-is-python3 python3 python3-pip cpio wget aria2
+        # 修正 1: 安装正确的包名 aria2，去掉已废弃的 python-pip
+        sudo apt -y install python3 python3-pip cpio wget aria2
         pip3 install twrpdtgen
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
-        # 注意：这里调用的命令依然是 aria2c，这是正确的
+        # 使用 aria2c 下载
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        ls
+        # 打印当前目录文件，方便调试
+        ls -lh
       
     - name: Start build
       run: |
-        # twrpdtgen 会处理目录下所有的 .img 文件
-        python3 -m twrpdtgen -o dt/ *.img
-
+        # 修正 2: 明确提取一个 img 文件名，防止 *.img 展开后参数过多导致 3.0.0 版本报错
+        IMAGE_FILE=$(ls *.img | head -n 1)
+        echo "Target image: $IMAGE_FILE"
+        # 修正 3: 使用符合 3.0.0 标准的参数格式
+        python3 -m twrpdtgen "$IMAGE_FILE" -o dt/
+      
     - name: ZIP device tree
       run: |
-        zip -r DeviceTree.zip ./dt
+        # 检查 dt 目录是否生成成功，避免打包空文件
+        if [ -d "dt" ]; then
+          zip -r DeviceTree.zip ./dt
+        else
+          echo "Error: Device tree directory 'dt' not found!"
+          exit 1
+        fi
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
