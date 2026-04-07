@@ -1,10 +1,10 @@
-name: Make TWRP Device (Auto-Fix Props)
+name: Make TWRP Device Tree (OPPO A35 Fix)
 
 on:
   workflow_dispatch:
     inputs:
-      IMG_URL:    
-        description: 'Recovery 镜像直链'
+      IMG_URL:
+        description: 'Recovery 镜像下载直链 (确保是 Raw 链接)'
         required: true
         default: ''
 
@@ -12,68 +12,76 @@ jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-22.04
-    
+    permissions:
+      contents: write
+
     steps:
     - name: Check Out
       uses: actions/checkout@main
-      
+
     - name: Prepare Environment
       run: |
         sudo apt update
         sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
                            lib32z1 lib32ncurses6 lib32stdc++6 \
                            xz-utils gzip bzip2 git lz4 lzop device-tree-compiler tar
+        
         sudo pip3 install --upgrade pip
+        # 使用你测试稳定的 2.1.0 版本
         sudo pip3 install twrpdtgen==2.1.0 python-magic
-        git clone https://github.com/draekko/AIK-Linux.git $HOME/AIK
+        
+        # 克隆你测试成功的 SebaUbuntu AIK 镜像工具
+        git clone https://github.com/SebaUbuntu/AIK-Linux-mirror.git $HOME/AIK
         chmod -R 777 $HOME/AIK
 
-    - name: Download and Pre-process Image
+    - name: Download and Process Image
       run: |
+        # 下载镜像
         aria2c "${{ github.event.inputs.IMG_URL }}"
         IMG_NAME=$(ls *.img | head -n 1)
-        mv "$IMG_NAME" recovery.img
+        cp "$IMG_NAME" $HOME/AIK/recovery.img
         
-        # --- 核心修复逻辑：手动注入属性防止 AssertionError ---
-        echo "正在使用 AIK 解包并注入 OPPO 缺失属性..."
-        cp recovery.img $HOME/AIK/
-        cd $HOME/AIK/
-        ./unpackimg.sh recovery.img
+        cd $HOME/AIK
+        # 1. 解包镜像
+        sudo ./unpackimg.sh recovery.img
         
-        # 强制将 PEFM00 属性写入 ramdisk 中的所有可能配置文件
-        # 针对 OPPO A35 的 MTK 平台特性
+        # 2. 【核心修复】针对 OPPO A35 注入缺失的识别属性
+        # 覆盖所有可能的 prop 路径，彻底解决 AssertionError
         for propfile in ramdisk/default.prop ramdisk/prop.default ramdisk/system/etc/prop.default; do
           if [ -f "$propfile" ]; then
-            echo "注入属性到 $propfile"
-            echo "ro.product.device=PEFM00" >> "$propfile"
-            echo "ro.product.system.device=PEFM00" >> "$propfile"
-            echo "ro.product.manufacturer=oppo" >> "$propfile"
-            echo "ro.product.brand=oppo" >> "$propfile"
-            echo "ro.product.model=OPPO A35" >> "$propfile"
+            echo "--- 正在修复属性: $propfile ---"
+            sudo sh -c "echo 'ro.product.device=PEFM00' >> $propfile"
+            sudo sh -c "echo 'ro.product.system.device=PEFM00' >> $propfile"
+            sudo sh -c "echo 'ro.product.manufacturer=oppo' >> $propfile"
+            sudo sh -c "echo 'ro.product.brand=oppo' >> $propfile"
+            sudo sh -c "echo 'ro.product.model=OPPO A35' >> $propfile"
           fi
         done
         
-        ./repackimg.sh
-        mv image-new.img $GITHUB_WORKSPACE/recovery_fixed.img
+        # 3. 重新打包
+        sudo ./repackimg.sh
+        
+        # 4. 移回工作目录
+        cp image-new.img $GITHUB_WORKSPACE/recovery_fixed.img
         cd $GITHUB_WORKSPACE
 
-    - name: Run twrpdtgen
+    - name: Generate Device Tree
       run: |
-        # 使用修复后的镜像生成设备树
         mkdir dt
+        # 使用修复了属性的镜像生成 DT
         python3 -m twrpdtgen recovery_fixed.img -o dt/ || {
-          echo "自动识别仍失败，尝试强制参数模式..."
+          echo "自动识别仍有异常，尝试强制指定参数生成..."
           python3 -m twrpdtgen recovery_fixed.img --manufacturer oppo --codename PEFM00 -o dt/
         }
-      
-    - name: ZIP and Upload
+
+    - name: ZIP Device Tree
       if: always()
       run: |
-        if [ -d "dt" ] && [ "$(ls -A dt)" ]; then
-          # 额外检查：确保生成的目录里有关键文件
+        if [ -d "dt/oppo/PEFM00" ] || [ -d "dt/generic/generic" ]; then
           zip -r DeviceTree_PEFM00.zip ./dt
+          echo "✅ 设备树生成成功！"
         else
-          echo "最终生成失败，请检查输出日志。"
+          echo "❌ 目录为空，生成失败。请检查日志。"
           exit 1
         fi
 
@@ -82,3 +90,18 @@ jobs:
       with:
         name: TWRP_DT_OPPO_A35
         path: DeviceTree_PEFM00.zip
+
+    - name: Upload to Release (Optional)
+      if: success()
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ./DeviceTree_PEFM00.zip
+        name: TWRP_DT_PEFM00-${{ github.run_id }}
+        tag_name: ${{ github.run_id }}
+        body: |
+          Build Summary:
+          - Device: OPPO A35 (PEFM00)
+          - Tool: twrpdtgen 2.1.0 + AIK-SebaUbuntu
+          - Status: Fixed ro.product.device missing error.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
