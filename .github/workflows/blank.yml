@@ -20,33 +20,32 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 修正 1: 安装正确的包名 aria2，去掉已废弃的 python-pip
-        sudo apt -y install python3 python3-pip cpio wget aria2
-        pip3 install twrpdtgen
+        # 核心：添加了 libmagic1，这是 AIK 识别文件类型所必需的
+        sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1
+        # 安装 twrpdtgen 及其可能需要的 magic 依赖
+        pip3 install twrpdtgen python-magic
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
-        # 使用 aria2c 下载
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 打印当前目录文件，方便调试
+        # 这里的命名可能是 recovery.1.img，我们统一重命名简化处理
+        IMG_NAME=$(ls *.img | head -n 1)
+        mv "$IMG_NAME" recovery.img
         ls -lh
       
     - name: Start build
       run: |
-        # 修正 2: 明确提取一个 img 文件名，防止 *.img 展开后参数过多导致 3.0.0 版本报错
-        IMAGE_FILE=$(ls *.img | head -n 1)
-        echo "Target image: $IMAGE_FILE"
-        # 修正 3: 使用符合 3.0.0 标准的参数格式
-        python3 -m twrpdtgen "$IMAGE_FILE" -o dt/
+        # 使用 python3 调用，并增加调试参数 -d (debug)
+        # 如果还是报错，可以通过日志看到 AIK 具体的输出
+        python3 -m twrpdtgen recovery.img -o dt/ -d
       
     - name: ZIP device tree
       run: |
-        # 检查 dt 目录是否生成成功，避免打包空文件
         if [ -d "dt" ]; then
           zip -r DeviceTree.zip ./dt
         else
-          echo "Error: Device tree directory 'dt' not found!"
+          echo "Error: Device tree generation failed. No dt directory found."
           exit 1
         fi
 
@@ -57,6 +56,7 @@ jobs:
           ./DeviceTree.zip
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: DeviceTree for twrp
+        body: |
+          DeviceTree generated for: ${{ github.event.inputs.IMG_URL }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
