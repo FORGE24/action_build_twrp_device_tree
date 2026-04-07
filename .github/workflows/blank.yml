@@ -20,32 +20,34 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        # 核心：添加了 libmagic1，这是 AIK 识别文件类型所必需的
-        sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1
-        # 安装 twrpdtgen 及其可能需要的 magic 依赖
+        # 安装 AIK 和 twrpdtgen 所需的核心依赖
+        # 包括 32 位运行库 (lib32z1, lib32ncurses6) 和 必要的解包工具
+        sudo apt -y install python3 python3-pip cpio wget aria2 libmagic1 file \
+                           lib32z1 lib32ncurses6 lib32stdc++6 \
+                           xz-utils gzip bzip2
         pip3 install twrpdtgen python-magic
         mkdir dt
       
     - name: Download boot or recovery img
       run: |
         aria2c "${{ github.event.inputs.IMG_URL }}"
-        # 这里的命名可能是 recovery.1.img，我们统一重命名简化处理
+        # 自动识别并重命名下载的文件
         IMG_NAME=$(ls *.img | head -n 1)
         mv "$IMG_NAME" recovery.img
         ls -lh
       
     - name: Start build
       run: |
-        # 使用 python3 调用，并增加调试参数 -d (debug)
-        # 如果还是报错，可以通过日志看到 AIK 具体的输出
-        python3 -m twrpdtgen recovery.img -o dt/ -d
+        # 使用 sudo 运行有时可以解决 AIK 在 /tmp 下的权限问题
+        # 但 twrpdtgen 通常推荐普通权限，如果下面失败，可以尝试在前面加 sudo
+        python3 -m twrpdtgen recovery.img -o dt/
       
     - name: ZIP device tree
       run: |
-        if [ -d "dt" ]; then
+        if [ -d "dt/xiaomi" ] || [ -d "dt/samsung" ] || [ -n "$(ls -A dt/ 2>/dev/null)" ]; then
           zip -r DeviceTree.zip ./dt
         else
-          echo "Error: Device tree generation failed. No dt directory found."
+          echo "Error: Device tree generation failed. Check logs above."
           exit 1
         fi
 
@@ -57,6 +59,8 @@ jobs:
         name: TWRP_Device_Tree-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          DeviceTree generated for: ${{ github.event.inputs.IMG_URL }}
+          Build Info:
+          - Image URL: ${{ github.event.inputs.IMG_URL }}
+          - Tool: twrpdtgen 3.0.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
